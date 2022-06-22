@@ -22,6 +22,50 @@
 #include "paddle2onnx/utils/utils.h"
 
 namespace paddle2onnx {
+
+void ProgramDescAddAnnotation(std::shared_ptr<paddle2onnx::framework::proto::ProgramDesc> prog) {
+  for (int bi = 0; bi < prog->blocks_size(); bi++) {
+    auto block = prog->mutable_blocks(bi);
+    for (int oi = 0; oi < block->ops_size(); oi++) {
+      auto op = block->mutable_ops(oi);
+      std::string input_signature;
+      for (int i = 0; i < op->inputs_size(); i++) {
+        auto & input = op->inputs(i);
+        input_signature += input.parameter() + ":";
+        input_signature += std::to_string(input.arguments_size());
+        input_signature += ";";
+      }
+      std::string output_signature;
+      for (int i = 0; i < op->outputs_size(); i++) {
+        auto & output = op->outputs(i);
+        output_signature += output.parameter() + ":";
+        output_signature += std::to_string(output.arguments_size());
+        output_signature += ";";
+      }
+      std::string signature = input_signature + "$" + output_signature;
+      std::cout << op->type() << " - signature: " << signature << "\n";
+      {
+        auto attr = op->add_attrs();
+        attr->set_name("p2o_signature");
+        attr->set_type(paddle2onnx::framework::proto::AttrType::STRING);
+        attr->set_s(signature);
+      }
+      {
+        auto attr = op->add_attrs();
+        attr->set_name("p2o_block_id");
+        attr->set_type(paddle2onnx::framework::proto::AttrType::INT);
+        attr->set_i(bi);
+      }
+      {
+        auto attr = op->add_attrs();
+        attr->set_name("p2o_op_id");
+        attr->set_type(paddle2onnx::framework::proto::AttrType::INT);
+        attr->set_i(oi);
+      }
+    }
+  }
+}
+
 bool PaddleParser::LoadProgram(const std::string& model) {
   prog = std::make_shared<paddle2onnx::framework::proto::ProgramDesc>();
   std::ifstream fin(model, std::ios::in | std::ios::binary);
@@ -46,6 +90,7 @@ bool PaddleParser::LoadProgram(const std::string& model) {
                 << std::endl;
     return false;
   }
+  ProgramDescAddAnnotation(prog);
   return true;
 }
 
@@ -56,6 +101,7 @@ bool PaddleParser::LoadProgram(const void* model_buffer, int model_size) {
                 << std::endl;
     return false;
   }
+  ProgramDescAddAnnotation(prog);
   return true;
 }
 

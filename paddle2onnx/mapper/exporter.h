@@ -29,6 +29,10 @@ struct ModelExporter {
   std::vector<std::shared_ptr<ONNX_NAMESPACE::NodeProto>> parameters;
   std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>> inputs;
   std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>> outputs;
+
+  std::set<std::string> ignore_ops;
+  std::set<std::string> keep_attrs;
+
   OnnxHelper _helper;
   int32_t _total_ops_num = 0;
   int32_t _current_exported_num = 0;
@@ -54,6 +58,8 @@ struct ModelExporter {
   ONNX_NAMESPACE::ModelProto Optimize(const ONNX_NAMESPACE::ModelProto& model);
 
  public:
+  void set_ignore_ops(const std::vector<std::string> & ops);
+  void set_keep_attrs(const std::vector<std::string> & attrs);
   QuantizeModelProcessor quantize_model_processer;
   // Get a proper opset version in range of [7, 15]
   // Also will check the model is convertable, this will include 2 parts

@@ -4,9 +4,10 @@ CMAKE_MINIMUM_REQUIRED (VERSION 3.16)
 ADD_SUBDIRECTORY(paddle2onnx)
 
 option(WITH_STATIC              "Compile Paddle2ONNX with  STATIC"               OFF)
-option(PADDLE2ONNX_DEBUG "If open the debug log while converting model"          OFF)
-option(MSVC_STATIC_CRT          "Compile Paddle2ONNX with  MSVC STATIC CRT"               ON)
+option(PADDLE2ONNX_DEBUG "If open the debug log while converting model"          ON)
+option(MSVC_STATIC_CRT          "Compile Paddle2ONNX with  MSVC STATIC CRT"               OFF)
 set(ONNX_CUSTOM_PROTOC_PATH "" CACHE STRING "Set yourself Protobufc path")
+set(ONNX_USE_PROTOBUF_SHARED_LIBS ON)
 
 if(PADDLE2ONNX_DEBUG)
   add_definitions(-DPADDLE2ONNX_DEBUG)

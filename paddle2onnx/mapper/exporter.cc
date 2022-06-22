@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #include "paddle2onnx/mapper/exporter.h"
-
+#include <regex>
 #include <onnx/checker.h>
 
 #include "onnxoptimizer/optimize.h"
@@ -35,6 +35,14 @@ void ModelExporter::ExportParameters(
     auto node = MakeConstant(item.first, item.second);
     parameters.push_back(std::move(node));
   }
+}
+
+void ModelExporter::set_ignore_ops(const std::vector<std::string> & ops) {
+  for (auto & o : ops) ignore_ops.insert(o);
+}
+
+void ModelExporter::set_keep_attrs(const std::vector<std::string> & attrs) {
+  for (auto & a : attrs) keep_attrs.insert(a);
 }
 
 void ModelExporter::UpdateParameters(
@@ -65,6 +73,107 @@ void ModelExporter::ExportInputOutputs(
   }
 }
 
+class FallbackMapper : public Mapper {
+public:
+  FallbackMapper(const PaddleParser & p, OnnxHelper* helper, int block_id, int64_t op_id, const std::string & name)
+    : Mapper(p, helper, block_id, op_id, "Fallback"), name_(name) {
+  }
+  int32_t GetMinOpset(bool verbose = false) {
+    return 7;
+  }
+  void Opset7() {
+    // TODO fallback op inputs and outputs???
+    //   bypass all attributes?
+    //   bypass all non-empty inputs, outputs X3_Out1
+    //   get the block_id, op_id?
+    assert(HasAttr("p2o_signature"));
+    std::string sig;
+    GetAttr("p2o_signature", &sig);
+    int dollar_idx = sig.find("$");
+    int idx = 0;
+    std::vector<std::string> inputs;
+    std::vector<std::string> outputs;
+    while (idx < dollar_idx) {
+      int pos = sig.find(":", idx);
+      std::string name = sig.substr(idx, pos - idx);
+      idx = pos + 1;
+      pos = sig.find(";", idx);
+      std::string count = sig.substr(idx, pos - idx);
+      idx = pos + 1;
+      std::cout << "`" << name << "`, `" << count << "`\n";
+      for (int i = 0; i < stoi(count); i++) {
+        inputs.push_back(GetInput(name)[i].name);
+      }
+    }
+    idx = dollar_idx + 1;
+    while (idx < sig.size()) {
+      int pos = sig.find(":", idx);
+      std::string name = sig.substr(idx, pos - idx);
+      idx = pos + 1;
+      pos = sig.find(";", idx);
+      std::string count = sig.substr(idx, pos - idx);
+      idx = pos + 1;
+      std::cout << "`" << name << "`, `" << count << "`\n";
+      for (int i = 0; i < stoi(count); i++) {
+        outputs.push_back(GetOutput(name)[i].name);
+      }
+    }
+
+    auto node = helper_->MakeNode("Fallback", inputs, outputs);
+    node->set_domain("paddle");
+    {
+      auto attr = node->add_attribute();
+      attr->set_name("plugin_version");
+      attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+      attr->set_s("0.9.0");
+    }
+    {
+      auto attr = node->add_attribute();
+      attr->set_name("plugin_namespace");
+      attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+      attr->set_s("paddle");
+    }
+    // TODO load fields
+    {
+      {
+        auto attr = node->add_attribute();
+        attr->set_name("paddle_signature");
+        attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+        attr->set_s(sig);
+      }
+      assert(HasAttr("p2o_block_id"));
+      int64_t block_id;
+      GetAttr("p2o_block_id", &block_id);
+      {
+        auto attr = node->add_attribute();
+        attr->set_name("paddle_block_id");
+        attr->set_type(ONNX_NAMESPACE::AttributeProto::INT);
+        attr->set_i(block_id);
+      }
+      assert(HasAttr("p2o_op_id"));
+      int64_t op_id;
+      GetAttr("p2o_op_id", &op_id);
+      {
+        auto attr = node->add_attribute();
+        attr->set_name("paddle_op_id");
+        attr->set_type(ONNX_NAMESPACE::AttributeProto::INT);
+        attr->set_i(op_id);
+      }
+      {
+        auto attr = node->add_attribute();
+        attr->set_name("paddle_op_name");
+        attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+        attr->set_s(name_);
+      }
+      // TODO input number? scope info?
+    }
+  }
+
+ private:
+  std::map<std::string, std::string> op_mapper_;
+  std::string name_;
+};
+
 void ModelExporter::ExportOp(const PaddleParser& parser, OnnxHelper* helper,
                              int32_t opset_version, int64_t block_id,
                              int64_t op_id, bool verbose) {
@@ -78,8 +187,13 @@ void ModelExporter::ExportOp(const PaddleParser& parser, OnnxHelper* helper,
     return ExportLoop(parser, helper, opset_version, block_id, op_id, verbose);
   }
 
-  auto mapper = MapperHelper::Get()->CreateMapper(op.type(), parser, helper,
-                                                  block_id, op_id);
+  Mapper *mapper;
+  if (ignore_ops.find(op.type()) != ignore_ops.end()) {
+    P2OLogger(true) << "---\033[31mIgnored operator: " << op.type() << " \033[0m---" << std::endl;
+    mapper = new FallbackMapper(parser, helper, block_id, op_id, op.type());
+  } else {
+    mapper = MapperHelper::Get()->CreateMapper(op.type(), parser, helper, block_id, op_id);
+  }
 #ifdef PADDLE2ONNX_DEBUG
   P2OLogger(true) << "Mapper Name: " << mapper->Name() << std::endl;
 #endif
@@ -236,9 +350,10 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
       logger << item << ",";
     }
     logger << std::endl;
-    Assert(1 == 0,
-           "Due to the unsupported operators, the conversion is aborted.");
+//    Assert(1 == 0,
+//           "Due to the unsupported operators, the conversion is aborted.");
   }
+  for (auto & u : unsupported_ops) ignore_ops.insert(u);
 
   int32_t min_opset = GetMinOpset(parser, verbose);
   if (min_opset < 0) {
@@ -296,6 +411,11 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
   // TODO(jiangjiajun) custom op is not considered
   opset_id->set_domain("");
   opset_id->set_version(opset_version);
+
+  auto opset_id_pd = model->add_opset_import();
+  opset_id_pd->set_domain("paddle");
+  opset_id_pd->set_version(7);
+
 
   ProcessGraphDumplicateNames(&parameters, &inputs, &outputs, &_helper.nodes);
   if (parser.is_quantized_model) {

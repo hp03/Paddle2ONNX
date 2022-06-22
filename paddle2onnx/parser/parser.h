@@ -195,6 +195,8 @@ class PaddleParser {
   // the shape inference of paddle is not correct
   bool _has_nms = false;
   std::vector<std::map<std::string, int64_t>> _constant_ops;
+  std::vector<std::string> _ignored_ops;
+  std::vector<std::string> _keep_attrs;
 };
 
 template <typename T>
