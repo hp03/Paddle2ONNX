@@ -41,8 +41,8 @@ void ModelExporter::set_ignore_ops(const std::vector<std::string> & ops) {
   for (auto & o : ops) ignore_ops.insert(o);
 }
 
-void ModelExporter::set_keep_attrs(const std::vector<std::string> & attrs) {
-  for (auto & a : attrs) keep_attrs.insert(a);
+void ModelExporter::set_convert_session_id(int session_id) {
+  convert_session_id = session_id;
 }
 
 void ModelExporter::UpdateParameters(
@@ -80,8 +80,8 @@ void ModelExporter::ExportInputOutputs(
 
 class FallbackMapper : public Mapper {
 public:
-  FallbackMapper(const PaddleParser & p, OnnxHelper* helper, int block_id, int64_t op_id, const std::string & name)
-    : Mapper(p, helper, block_id, op_id, "Fallback"), name_(name) {
+  FallbackMapper(const PaddleParser & p, OnnxHelper* helper, int block_id, int64_t op_id, const std::string & name, int session_id)
+    : Mapper(p, helper, block_id, op_id, "TRT_PluginV2"), name_(name), session_id_(session_id) {
   }
   int32_t GetMinOpset(bool verbose = false) {
     return 7;
@@ -91,92 +91,84 @@ public:
     //   bypass all attributes?
     //   bypass all non-empty inputs, outputs X3_Out1
     //   get the block_id, op_id?
-    assert(HasAttr("p2o_signature"));
-    std::string sig;
-    GetAttr("p2o_signature", &sig);
-    int dollar_idx = sig.find("$");
-    int idx = 0;
+    assert(HasAttr("p2o_input_sig"));
+    assert(HasAttr("p2o_output_sig"));
+    std::string input_sig;
+    std::string output_sig;
+    GetAttr("p2o_input_sig", &input_sig);
+    GetAttr("p2o_output_sig", &output_sig);
     std::vector<std::string> inputs;
     std::vector<std::string> outputs;
-    while (idx < dollar_idx) {
-      int pos = sig.find(":", idx);
-      std::string name = sig.substr(idx, pos - idx);
-      idx = pos + 1;
-      pos = sig.find(";", idx);
-      std::string count = sig.substr(idx, pos - idx);
-      idx = pos + 1;
-      std::cout << "`" << name << "`, `" << count << "`\n";
-      for (int i = 0; i < stoi(count); i++) {
-        inputs.push_back(GetInput(name)[i].name);
+    auto parseSig = [&](const std::string& sig, std::vector<std::string>& vars, bool is_input) {
+      for (int idx = 0; idx < sig.size(); idx++) {
+        int pos = sig.find(":", idx);
+        std::string name = sig.substr(idx, pos - idx);
+        idx = pos + 1;
+        pos = sig.find(",", idx);
+        if (pos == std::string::npos) pos = sig.size();
+        std::string count = sig.substr(idx, pos - idx);
+        idx = pos + 1;
+        std::cout << "`" << name << "`, `" << count << "`\n";
+        for (int i = 0; i < stoi(count); i++) {
+          if (is_input) {
+            vars.push_back(GetInput(name)[i].name);
+          } else {
+            vars.push_back(GetOutput(name)[i].name);
+          }
+        }
       }
-    }
-    idx = dollar_idx + 1;
-    while (idx < sig.size()) {
-      int pos = sig.find(":", idx);
-      std::string name = sig.substr(idx, pos - idx);
-      idx = pos + 1;
-      pos = sig.find(";", idx);
-      std::string count = sig.substr(idx, pos - idx);
-      idx = pos + 1;
-      std::cout << "`" << name << "`, `" << count << "`\n";
-      for (int i = 0; i < stoi(count); i++) {
-        outputs.push_back(GetOutput(name)[i].name);
-      }
-    }
+    };
+    parseSig(input_sig, inputs, 1);
+    parseSig(output_sig, outputs, 0);
 
-    auto node = helper_->MakeNode("Fallback", inputs, outputs);
+    auto node = helper_->MakeNode("TRT_PluginV2", inputs, outputs);
     node->set_domain("paddle");
     {
       auto attr = node->add_attribute();
-      attr->set_name("plugin_version");
+      attr->set_name("name");
+      attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+      attr->set_s("Fallback");
+    }
+    {
+      auto attr = node->add_attribute();
+      attr->set_name("version");
       attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
       attr->set_s("0.9.0");
     }
     {
       auto attr = node->add_attribute();
-      attr->set_name("plugin_namespace");
+      attr->set_name("namespace");
       attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
       attr->set_s("paddle");
     }
-    // TODO load fields
     {
-      {
-        auto attr = node->add_attribute();
-        attr->set_name("paddle_signature");
-        attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
-        attr->set_s(sig);
-      }
-      assert(HasAttr("p2o_block_id"));
+      std::string sig = "";
       int64_t block_id;
+      assert(HasAttr("p2o_block_id"));
       GetAttr("p2o_block_id", &block_id);
-      {
-        auto attr = node->add_attribute();
-        attr->set_name("paddle_block_id");
-        attr->set_type(ONNX_NAMESPACE::AttributeProto::INT);
-        attr->set_i(block_id);
-      }
-      assert(HasAttr("p2o_op_id"));
       int64_t op_id;
+      assert(HasAttr("p2o_op_id"));
       GetAttr("p2o_op_id", &op_id);
-      {
-        auto attr = node->add_attribute();
-        attr->set_name("paddle_op_id");
-        attr->set_type(ONNX_NAMESPACE::AttributeProto::INT);
-        attr->set_i(op_id);
-      }
-      {
-        auto attr = node->add_attribute();
-        attr->set_name("paddle_op_name");
-        attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
-        attr->set_s(name_);
-      }
-      // TODO input number? scope info?
+      std::string data;
+      data += std::to_string(session_id_);
+      data += ",";
+      data += std::to_string(block_id);
+      data += ",";
+      data += std::to_string(op_id);
+      data += "[" + input_sig + "]";
+      data += "[" + output_sig + "]";
+
+      auto attr = node->add_attribute();
+      attr->set_name("data");
+      attr->set_type(ONNX_NAMESPACE::AttributeProto::STRING);
+      attr->set_s(data);
     }
   }
 
  private:
   std::map<std::string, std::string> op_mapper_;
   std::string name_;
+  int session_id_;
 };
 
 void ModelExporter::ExportOp(const PaddleParser& parser, OnnxHelper* helper,
@@ -195,7 +187,7 @@ void ModelExporter::ExportOp(const PaddleParser& parser, OnnxHelper* helper,
   Mapper *mapper;
   if (ignore_ops.find(op.type()) != ignore_ops.end()) {
     P2OLogger(true) << "---\033[31mIgnored operator: " << op.type() << " \033[0m---" << std::endl;
-    mapper = new FallbackMapper(parser, helper, block_id, op_id, op.type());
+    mapper = new FallbackMapper(parser, helper, block_id, op_id, op.type(), convert_session_id);
   } else {
     mapper = MapperHelper::Get()->CreateMapper(op.type(), parser, helper, block_id, op_id);
   }

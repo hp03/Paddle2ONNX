@@ -30,25 +30,29 @@ void ProgramDescAddAnnotation(std::shared_ptr<paddle2onnx::framework::proto::Pro
       auto op = block->mutable_ops(oi);
       std::string input_signature;
       for (int i = 0; i < op->inputs_size(); i++) {
+        if (i) input_signature += ",";
         auto & input = op->inputs(i);
         input_signature += input.parameter() + ":";
         input_signature += std::to_string(input.arguments_size());
-        input_signature += ";";
       }
       std::string output_signature;
       for (int i = 0; i < op->outputs_size(); i++) {
+        if (i) output_signature += ",";
         auto & output = op->outputs(i);
         output_signature += output.parameter() + ":";
         output_signature += std::to_string(output.arguments_size());
-        output_signature += ";";
       }
-      std::string signature = input_signature + "$" + output_signature;
-      std::cout << op->type() << " - signature: " << signature << "\n";
       {
         auto attr = op->add_attrs();
-        attr->set_name("p2o_signature");
+        attr->set_name("p2o_input_sig");
         attr->set_type(paddle2onnx::framework::proto::AttrType::STRING);
-        attr->set_s(signature);
+        attr->set_s(input_signature);
+      }
+      {
+        auto attr = op->add_attrs();
+        attr->set_name("p2o_output_sig");
+        attr->set_type(paddle2onnx::framework::proto::AttrType::STRING);
+        attr->set_s(output_signature);
       }
       {
         auto attr = op->add_attrs();

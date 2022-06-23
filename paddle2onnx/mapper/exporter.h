@@ -31,7 +31,7 @@ struct ModelExporter {
   std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>> outputs;
 
   std::set<std::string> ignore_ops;
-  std::set<std::string> keep_attrs;
+  int convert_session_id;
 
   OnnxHelper _helper;
   int32_t _total_ops_num = 0;
@@ -59,7 +59,7 @@ struct ModelExporter {
 
  public:
   void set_ignore_ops(const std::vector<std::string> & ops);
-  void set_keep_attrs(const std::vector<std::string> & attrs);
+  void set_convert_session_id(int session_id);
   QuantizeModelProcessor quantize_model_processer;
   // Get a proper opset version in range of [7, 15]
   // Also will check the model is convertable, this will include 2 parts

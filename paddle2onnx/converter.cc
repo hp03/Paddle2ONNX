@@ -137,7 +137,7 @@ PADDLE2ONNX_DECL bool Export(const void* model_buffer, int model_size,
 PADDLE2ONNX_DECL bool Export(const char* model, const char* params, char** out,
                              int* out_size, 
                              const std::vector<std::string> &ignore_ops,
-                             const std::vector<std::string> &keep_attrs,
+                             int convert_session_id,
                              int32_t opset_version,
                              bool auto_upgrade_opset, bool verbose,
                              bool enable_onnx_checker,
@@ -152,7 +152,7 @@ PADDLE2ONNX_DECL bool Export(const char* model, const char* params, char** out,
 
   paddle2onnx::ModelExporter me;
   me.set_ignore_ops(ignore_ops);
-  me.set_keep_attrs(keep_attrs);
+  me.set_convert_session_id(convert_session_id);
   std::string result =
       me.Run(parser, opset_version, auto_upgrade_opset, verbose,
              enable_onnx_checker, enable_experimental_op, enable_optimize);

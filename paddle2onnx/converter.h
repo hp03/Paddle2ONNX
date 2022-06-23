@@ -57,6 +57,6 @@ PADDLE2ONNX_DECL bool Export(
     bool enable_onnx_checker = true, bool enable_experimental_op = false,
     bool enable_optimize = true);
 
-PADDLE2ONNX_DECL bool Export(const char *model, const char *params, char **out, int *out_size, const std::vector<std::string> &ignore_ops, const std::vector<std::string> &keep_attrs, int32_t opset_version = 11, bool auto_upgrade_opset = true, bool verbose = false, bool enable_onnx_checker = true, bool enable_experimental_op = false, bool enable_optimize = true);
+PADDLE2ONNX_DECL bool Export(const char *model, const char *params, char **out, int *out_size, const std::vector<std::string> &ignore_ops, int convert_sesion_id, int32_t opset_version = 11, bool auto_upgrade_opset = true, bool verbose = false, bool enable_onnx_checker = true, bool enable_experimental_op = false, bool enable_optimize = true);
 
 }  // namespace paddle2onnx
